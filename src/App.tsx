@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import GameCanvas from './components/GameCanvas';
-import { Box, GameState, GAME_WIDTH, GAME_HEIGHT, GROUND_HEIGHT, BOX_COLORS } from './types';
+import { Box, GameState, GAME_WIDTH, GAME_HEIGHT, GROUND_HEIGHT, BOX_COLORS, DIFFICULTY, DifficultyLevel, randomBetween, clamp } from './types';
 import { PhysicsEngine, analyzeStackStability } from './PhysicsEngine';
 import { playDropSound, playGameOverSound } from './utils/sound';
 import { saveHighScore, getHighScore, formatScore } from './utils/score';
@@ -20,6 +20,8 @@ const StackingGame: React.FC = () => {
   const fixedTopY = 400;
   
   const [highScore, setHighScore] = useState(() => getHighScore());
+
+  const difficulty: DifficultyLevel = 'normal';
 
   const gameLoopRef = useRef<number>();
   const lastTimeRef = useRef<number>(0);
@@ -65,6 +67,16 @@ const StackingGame: React.FC = () => {
         newFallingBox = PhysicsEngine.updateBox(newFallingBox, deltaTime);
 
         const lastBox = newBoxes.length > 0 ? newBoxes[newBoxes.length - 1] : null;
+        // 计算与渲染一致的整体摇摆的水平偏移，仅用于碰撞与落顶判定
+        const SWAY_THRESHOLD = 5;
+        let swayX = 0;
+        if (newBoxes.length >= SWAY_THRESHOLD) {
+          const tSec = currentTime / 1000;
+          const freq = 0.25;
+          const levelFactor = Math.max(0, newBoxes.length - SWAY_THRESHOLD + 1);
+          const ampX = Math.min(10, levelFactor * 0.6);
+          swayX = ampX * Math.sin(2 * Math.PI * freq * tSec);
+        }
         let hasCollisionWithLast = false;
 
         // 与地面碰撞视为失败
@@ -73,9 +85,10 @@ const StackingGame: React.FC = () => {
         }
 
         // 仅允许与上一个箱子碰撞
-        if (lastBox && PhysicsEngine.checkCollision(newFallingBox, lastBox)) {
+        const adjustedLast = lastBox ? { ...lastBox, x: lastBox.x + swayX } : null;
+        if (adjustedLast && PhysicsEngine.checkCollision(newFallingBox, adjustedLast)) {
           hasCollisionWithLast = true;
-          newFallingBox = PhysicsEngine.resolveCollision(newFallingBox, lastBox);
+          newFallingBox = PhysicsEngine.resolveCollision(newFallingBox, adjustedLast);
         }
 
         // 与除上一个以外的任何箱子碰撞均失败
@@ -93,12 +106,39 @@ const StackingGame: React.FC = () => {
         if (!placementFailed && hasCollisionWithLast && Math.abs(newFallingBox.velocityY) < 0.5) {
           const leftA = newFallingBox.x;
           const rightA = newFallingBox.x + newFallingBox.width;
-          const leftB = lastBox!.x;
-          const rightB = lastBox!.x + lastBox!.width;
+          const leftB = (adjustedLast as Box).x;
+          const rightB = (adjustedLast as Box).x + (adjustedLast as Box).width;
           const overlap = Math.min(rightA, rightB) - Math.max(leftA, leftB);
           const overlapRatio = overlap / newFallingBox.width;
 
           if (overlapRatio >= 0.5 && newFallingBox.y <= lastBox!.y - newFallingBox.height + 0.5) {
+            // 为避免加入塔体后出现位置“闪动”，在加入前对其坐标做整体摇摆的逆变换
+            const SWAY_THRESHOLD = 5;
+            const prospectiveCount = newBoxes.length + 1; // 加入后用于渲染的层数
+            if (prospectiveCount >= SWAY_THRESHOLD) {
+              const baseBox = newBoxes.reduce((acc, b) => (b.y > acc.y ? b : acc), newBoxes[0]);
+              const pivotX = baseBox.x + baseBox.width / 2;
+              const pivotY = baseBox.y + baseBox.height / 2;
+              const tSec = currentTime / 1000;
+              const freq = 0.25;
+              const levelFactor = Math.max(0, prospectiveCount - SWAY_THRESHOLD + 1);
+              const ampX = Math.min(10, levelFactor * 0.6);
+              const ampDeg = Math.min(2, levelFactor * 0.15);
+              const swayXPlace = ampX * Math.sin(2 * Math.PI * freq * tSec);
+              const swayRadPlace = (ampDeg * Math.sin(2 * Math.PI * freq * tSec + 0.4)) * Math.PI / 180;
+              const cosT = Math.cos(-swayRadPlace);
+              const sinT = Math.sin(-swayRadPlace);
+              const cx = newFallingBox.x + newFallingBox.width / 2;
+              const cy = newFallingBox.y + newFallingBox.height / 2;
+              const vx = cx - swayXPlace - pivotX;
+              const vy = cy - pivotY;
+              const rx = cosT * vx - sinT * vy;
+              const ry = sinT * vx + cosT * vy;
+              const placedCx = rx + pivotX;
+              const placedCy = ry + pivotY;
+              newFallingBox.x = placedCx - newFallingBox.width / 2;
+              newFallingBox.y = placedCy - newFallingBox.height / 2;
+            }
             newFallingBox.isMoving = false;
             newFallingBox.velocityX = 0;
             newFallingBox.velocityY = 0;
@@ -111,6 +151,8 @@ const StackingGame: React.FC = () => {
         }
       }
       
+      // 整体摇摆改为渲染层实现，逻辑层不注入摇摆
+
       newBoxes = newBoxes.map(box => PhysicsEngine.updateBox(box, deltaTime));
 
       const analysis = analyzeStackStability(newBoxes);
@@ -234,7 +276,9 @@ const StackingGame: React.FC = () => {
 
     // 始终让新箱子出现在屏幕顶部
     let newX = gameState.currentBoxX;
-    let newY = -cameraY + 10;
+    const level = Math.max(0, Math.floor(gameState.boxes.length / 3));
+    const spawnOffset = DIFFICULTY[difficulty].spawnHeightOffset(level);
+    let newY = -cameraY - spawnOffset;
 
     // 创建掉落箱子，添加轻微的随机摆动
     const fallingBox: Box = {
@@ -256,8 +300,16 @@ const StackingGame: React.FC = () => {
       fallingBox: fallingBox,
       score: prev.score + 1,
       isDropping: true,
-      nextBoxWidth: Math.max(40, 80 - prev.score * 2), // 箱子逐渐变小
-      nextBoxHeight: Math.max(30, 40 - prev.score) // 箱子逐渐变矮
+      nextBoxWidth: (() => {
+        const level = Math.max(0, Math.floor(prev.boxes.length / 3));
+        const [minW, maxW] = DIFFICULTY[difficulty].widthRangeForLevel(level);
+        return clamp(randomBetween(minW, maxW), 30, GAME_WIDTH / 3);
+      })(),
+      nextBoxHeight: (() => {
+        const level = Math.max(0, Math.floor(prev.boxes.length / 3));
+        const [minH, maxH] = DIFFICULTY[difficulty].heightRangeForLevel(level);
+        return clamp(randomBetween(minH, maxH), 20, GAME_HEIGHT / 10);
+      })()
     }));
 
     // 重置投放状态

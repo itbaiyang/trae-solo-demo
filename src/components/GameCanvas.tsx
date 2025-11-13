@@ -73,25 +73,54 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       ctx.fillStyle = '#8B4513';
       ctx.fillRect(0, canvas.height - 50, canvas.width, 50);
 
-      // 绘制已放置的箱子
-      boxes.forEach(box => {
+      // 绘制已放置的箱子：低层正常绘制，高层整体摇摆
+      const SWAY_THRESHOLD = 5;
+      const swaying = boxes.length >= SWAY_THRESHOLD;
+      let pivotX = 0, pivotY = 0, swayX = 0, swayRad = 0;
+      if (swaying) {
+        const baseBox = boxes.reduce((acc, b) => (b.y > acc.y ? b : acc), boxes[0]);
+        pivotX = baseBox.x + baseBox.width / 2;
+        pivotY = baseBox.y + baseBox.height / 2;
+        const tSec = performance.now() / 1000;
+        const freq = 0.25;
+        const levelFactor = Math.max(0, boxes.length - SWAY_THRESHOLD + 1);
+        const ampX = Math.min(10, levelFactor * 0.6);
+        const ampDeg = Math.min(2, levelFactor * 0.15);
+        swayX = ampX * Math.sin(2 * Math.PI * freq * tSec);
+        swayRad = (ampDeg * Math.sin(2 * Math.PI * freq * tSec + 0.4)) * Math.PI / 180;
+
         ctx.save();
-        
-        // 移动到箱子中心进行旋转
-        ctx.translate(box.x + box.width / 2, box.y + box.height / 2);
-        ctx.rotate((box.rotation * Math.PI) / 180);
-        
-        // 绘制箱子
-        ctx.fillStyle = box.color;
-        ctx.fillRect(-box.width / 2, -box.height / 2, box.width, box.height);
-        
-        // 绘制边框
-        ctx.strokeStyle = '#333';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(-box.width / 2, -box.height / 2, box.width, box.height);
-        
+        ctx.translate(pivotX, pivotY);
+        ctx.rotate(swayRad);
+        ctx.translate(-pivotX, -pivotY);
+        ctx.translate(swayX, 0);
+
+        boxes.forEach(box => {
+          ctx.save();
+          ctx.translate(box.x + box.width / 2, box.y + box.height / 2);
+          ctx.rotate((box.rotation * Math.PI) / 180);
+          ctx.fillStyle = box.color;
+          ctx.fillRect(-box.width / 2, -box.height / 2, box.width, box.height);
+          ctx.strokeStyle = '#333';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(-box.width / 2, -box.height / 2, box.width, box.height);
+          ctx.restore();
+        });
+
         ctx.restore();
-      });
+      } else if (boxes.length > 0) {
+        boxes.forEach(box => {
+          ctx.save();
+          ctx.translate(box.x + box.width / 2, box.y + box.height / 2);
+          ctx.rotate((box.rotation * Math.PI) / 180);
+          ctx.fillStyle = box.color;
+          ctx.fillRect(-box.width / 2, -box.height / 2, box.width, box.height);
+          ctx.strokeStyle = '#333';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(-box.width / 2, -box.height / 2, box.width, box.height);
+          ctx.restore();
+        });
+      }
 
       // 绘制当前控制的箱子（如果游戏没结束）
       if (!gameOver) {
@@ -124,7 +153,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
           ctx.restore();
         } else if (boxes.length > 0) {
           const previewY = -cameraY + 10;
-          
           // 绘制预览箱子
           ctx.fillStyle = BOX_COLORS[boxes.length % BOX_COLORS.length];
           ctx.globalAlpha = 0.7;
