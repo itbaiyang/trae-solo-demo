@@ -10,6 +10,8 @@ export interface Box {
   velocityY: number;
   rotation: number;
   rotationVelocity: number;
+  warning?: boolean;
+  precision?: number;
 }
 
 export interface GameState {
@@ -21,6 +23,16 @@ export interface GameState {
   nextBoxWidth: number;
   nextBoxHeight: number;
   fallingBox: Box | null; // 正在掉落的箱子
+  lastOverlapRatio?: number;
+  settings?: {
+    cameraFollowSpeed: number;
+    windStrength: number;
+    windRotationStrength: number;
+  };
+  mode?: 'classic' | 'timed' | 'limited';
+  timeLeft?: number;
+  maxBoxes?: number;
+  nextPowerup?: 'wider' | 'lockRotation' | null;
 }
 
 export const GAME_WIDTH = 800;
@@ -45,6 +57,8 @@ export interface DifficultyConfig {
   wobbleAmplitude: (level: number) => { vx: number; rotVel: number };
   wobbleFrequency: (level: number) => { vxHz: number; rotHz: number };
   minOverlapRatio: (level: number) => number;
+  widthShrinkPerLevel?: number;
+  initialRotationPerLevel?: number;
 }
 
 export const DIFFICULTY: Record<DifficultyLevel, DifficultyConfig> = {
@@ -67,7 +81,9 @@ export const DIFFICULTY: Record<DifficultyLevel, DifficultyConfig> = {
       return { vx: Math.min(15, 5 + l * 1.2), rotVel: Math.min(6, 2 + l * 0.5) };
     },
     wobbleFrequency: () => ({ vxHz: 0.8, rotHz: 0.9 }),
-    minOverlapRatio: (level: number) => 0.6 + Math.min(0.1, level * 0.01)
+    minOverlapRatio: (level: number) => 0.6 + Math.min(0.1, level * 0.01),
+    widthShrinkPerLevel: 1.5,
+    initialRotationPerLevel: 0.2
   },
   hard: {
     widthRangeForLevel: (level: number) => {
@@ -88,7 +104,9 @@ export const DIFFICULTY: Record<DifficultyLevel, DifficultyConfig> = {
       return { vx: Math.min(18, 8 + l * 1.5), rotVel: Math.min(8, 3 + l * 0.7) };
     },
     wobbleFrequency: () => ({ vxHz: 1.0, rotHz: 1.1 }),
-    minOverlapRatio: (level: number) => 0.65 + Math.min(0.1, level * 0.015)
+    minOverlapRatio: (level: number) => 0.65 + Math.min(0.1, level * 0.015),
+    widthShrinkPerLevel: 2,
+    initialRotationPerLevel: 0.3
   }
 };
 

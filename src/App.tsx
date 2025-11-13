@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import GameCanvas from './components/GameCanvas';
-import { Box, GameState, GAME_WIDTH, GAME_HEIGHT, GROUND_HEIGHT, BOX_COLORS, DIFFICULTY, DifficultyLevel, randomBetween, clamp } from './types';
+import { Box, GameState, GAME_WIDTH, GAME_HEIGHT, GROUND_HEIGHT, BOX_COLORS, DIFFICULTY, DifficultyLevel, randomBetween, clamp, MU, GRAVITY, TIP_MARGIN_PX } from './types';
 import { PhysicsEngine, analyzeStackStability } from './PhysicsEngine';
-import { playDropSound, playGameOverSound } from './utils/sound';
+import { playDropSound, playGameOverSound, playSuccessSound } from './utils/sound';
 import { saveHighScore, getHighScore, formatScore } from './utils/score';
 
 const StackingGame: React.FC = () => {
@@ -14,7 +14,14 @@ const StackingGame: React.FC = () => {
     currentBoxX: GAME_WIDTH / 2,
     nextBoxWidth: 80,
     nextBoxHeight: 40,
-    fallingBox: null
+    fallingBox: null,
+    settings: {
+      cameraFollowSpeed: 0.1,
+      windStrength: 0,
+      windRotationStrength: 0
+    },
+    mode: 'classic',
+    nextPowerup: null
   });
   const [cameraY, setCameraY] = useState(0);
   const fixedTopY = 400;
@@ -39,7 +46,9 @@ const StackingGame: React.FC = () => {
       velocityX: 0,
       velocityY: 0,
       rotation: 0,
-      rotationVelocity: 0
+      rotationVelocity: 0,
+      warning: false,
+      precision: 1
     };
 
     setGameState(prev => ({
@@ -61,10 +70,19 @@ const StackingGame: React.FC = () => {
       let newBoxes = [...prevState.boxes];
       let newFallingBox = prevState.fallingBox;
       let placementFailed = false;
+      let addedScoreBonus = 0;
+      let lastOverlapRatioLocal: number | undefined = undefined;
       
       // 更新掉落箱子的物理
       if (newFallingBox) {
         newFallingBox = PhysicsEngine.updateBox(newFallingBox, deltaTime);
+        const tSec = currentTime / 1000;
+        if (newFallingBox.isMoving) {
+          const windVX = Math.sin(tSec * 0.8 + 1.3) * (prevState.settings?.windStrength || 0);
+          const windRot = Math.sin(tSec * 1.1 + 0.7) * (prevState.settings?.windRotationStrength || 0);
+          newFallingBox.velocityX += windVX * (deltaTime / 1000);
+          newFallingBox.rotationVelocity += windRot * (deltaTime / 1000);
+        }
 
         const lastBox = newBoxes.length > 0 ? newBoxes[newBoxes.length - 1] : null;
         // 计算与渲染一致的整体摇摆的水平偏移，仅用于碰撞与落顶判定
@@ -109,7 +127,7 @@ const StackingGame: React.FC = () => {
           const leftB = (adjustedLast as Box).x;
           const rightB = (adjustedLast as Box).x + (adjustedLast as Box).width;
           const overlap = Math.min(rightA, rightB) - Math.max(leftA, leftB);
-          const overlapRatio = overlap / newFallingBox.width;
+          const overlapRatio = Math.max(0, overlap) / Math.min(newFallingBox.width, (adjustedLast as Box).width);
 
           if (overlapRatio >= 0.5 && newFallingBox.y <= lastBox!.y - newFallingBox.height + 0.5) {
             // 为避免加入塔体后出现位置“闪动”，在加入前对其坐标做整体摇摆的逆变换
@@ -143,8 +161,12 @@ const StackingGame: React.FC = () => {
             newFallingBox.velocityX = 0;
             newFallingBox.velocityY = 0;
             newFallingBox.rotationVelocity = 0;
+            newFallingBox.precision = overlapRatio;
             newBoxes.push(newFallingBox);
             newFallingBox = null;
+            addedScoreBonus += Math.round(overlapRatio * 5);
+            lastOverlapRatioLocal = overlapRatio;
+            playSuccessSound();
           } else {
             placementFailed = true;
           }
@@ -156,6 +178,12 @@ const StackingGame: React.FC = () => {
       newBoxes = newBoxes.map(box => PhysicsEngine.updateBox(box, deltaTime));
 
       const analysis = analyzeStackStability(newBoxes);
+      if (analysis.range && analysis.comX !== undefined && newBoxes.length > 0) {
+        const [L, R] = analysis.range;
+        const nearEdge = Math.min(Math.abs((analysis.comX as number) - L), Math.abs((analysis.comX as number) - R)) < TIP_MARGIN_PX;
+        const ti = newBoxes.length - 1;
+        newBoxes[ti] = { ...newBoxes[ti], warning: nearEdge };
+      }
       if (!analysis.stable && analysis.failingIndex !== undefined) {
         const range = analysis.range || [0, 0];
         const pivotX = (range[0] + range[1]) / 2;
@@ -163,9 +191,20 @@ const StackingGame: React.FC = () => {
         for (let j = analysis.failingIndex + 1; j < newBoxes.length; j++) {
           const b = { ...newBoxes[j] };
           b.isMoving = true;
+          const m = b.width * b.height;
+          const N = m * GRAVITY;
+          const dx = Math.abs((analysis.comX as number) - (dir > 0 ? range[1] : range[0]));
+          const Freq = m * GRAVITY * (dx / Math.max(1, b.height));
+          const Fmax = MU * N;
+          if (Freq > Fmax) {
+            b.velocityX += dir * 30;
+          } else {
+            const I = (1 / 3) * m * b.width * b.width;
+            const tau = m * GRAVITY * dx;
+            const alpha = tau / Math.max(1, I);
+            b.rotationVelocity += dir * alpha * (deltaTime / 1000);
+          }
           b.velocityY += 50;
-          b.velocityX += dir * 30;
-          b.rotationVelocity += dir * 30;
           newBoxes[j] = b;
         }
       }
@@ -187,17 +226,23 @@ const StackingGame: React.FC = () => {
           setCameraY(prev => prev + (0 - prev) * 0.3);
         } else {
           const topBox = newBoxes.reduce((acc, b) => (b.y < acc.y ? b : acc), newBoxes[0]);
-          const desiredCameraY = fixedTopY - topBox.y;    
-          console.log(1111111,desiredCameraY, topBox.y, fixedTopY)
-          setCameraY(prev => prev + (desiredCameraY - prev) * 0.1);
+          const desiredCameraY = fixedTopY - topBox.y;
+          setCameraY(prev => prev + (desiredCameraY - prev) * ((gameState.settings?.cameraFollowSpeed) || 0.1));
         }
       }
 
+      const timeLeftNext = prevState.mode === 'timed' ? Math.max(0, (prevState.timeLeft || 30) - deltaTime / 1000) : prevState.timeLeft;
+      const limitedFail = prevState.mode === 'limited' && prevState.maxBoxes !== undefined && newBoxes.length >= (prevState.maxBoxes as number);
+      const timedFail = prevState.mode === 'timed' && (timeLeftNext as number) <= 0;
       return {
         ...prevState,
         boxes: newBoxes,
         fallingBox: newFallingBox,
-        gameOver: !isStable
+        gameOver: !isStable || limitedFail || timedFail,
+        score: prevState.score + addedScoreBonus,
+        lastOverlapRatio: lastOverlapRatioLocal ?? prevState.lastOverlapRatio,
+        timeLeft: timeLeftNext,
+        nextPowerup: lastOverlapRatioLocal !== undefined && lastOverlapRatioLocal >= 0.9 ? 'wider' : prevState.nextPowerup
       };
     });
 
@@ -239,7 +284,14 @@ const StackingGame: React.FC = () => {
         currentBoxX: GAME_WIDTH / 2,
         nextBoxWidth: 80,
         nextBoxHeight: 40,
-        fallingBox: null
+        fallingBox: null,
+        settings: {
+          cameraFollowSpeed: 0.1,
+          windStrength: 0,
+          windRotationStrength: 0
+        },
+        mode: 'classic',
+        nextPowerup: null
       });
       
       // 重新初始化第一个箱子
@@ -255,7 +307,9 @@ const StackingGame: React.FC = () => {
           velocityX: 0,
           velocityY: 0,
           rotation: 0,
-          rotationVelocity: 0
+          rotationVelocity: 0,
+          warning: false,
+          precision: 1
         };
 
         setGameState(prev => ({
@@ -281,6 +335,9 @@ const StackingGame: React.FC = () => {
     let newY = -cameraY - spawnOffset;
 
     // 创建掉落箱子，添加轻微的随机摆动
+    const levelForParams = Math.max(0, Math.floor(gameState.boxes.length / 3));
+    const wobble = DIFFICULTY[difficulty].wobbleAmplitude(levelForParams);
+    const rotBase = (DIFFICULTY[difficulty].initialRotationPerLevel || 0) * levelForParams;
     const fallingBox: Box = {
       id: gameState.boxes.length,
       x: newX,
@@ -289,11 +346,16 @@ const StackingGame: React.FC = () => {
       height: gameState.nextBoxHeight,
       color: BOX_COLORS[gameState.boxes.length % BOX_COLORS.length],
       isMoving: true,
-      velocityX: (Math.random() - 0.5) * 0.5, // 轻微的随机水平速度
+      velocityX: (Math.random() - 0.5) * wobble.vx,
       velocityY: 0,
-      rotation: (Math.random() - 0.5) * 5, // 轻微的初始旋转
-      rotationVelocity: (Math.random() - 0.5) * 0.2 // 轻微的旋转速度
+      rotation: (Math.random() - 0.5) * (5 + rotBase * 10),
+      rotationVelocity: (Math.random() - 0.5) * Math.max(0.2, wobble.rotVel)
     };
+    if (gameState.nextPowerup === 'wider') {
+      fallingBox.width = Math.floor(fallingBox.width * 1.25);
+    } else if (gameState.nextPowerup === 'lockRotation') {
+      fallingBox.rotationVelocity = 0;
+    }
 
     setGameState(prev => ({
       ...prev,
@@ -303,13 +365,15 @@ const StackingGame: React.FC = () => {
       nextBoxWidth: (() => {
         const level = Math.max(0, Math.floor(prev.boxes.length / 3));
         const [minW, maxW] = DIFFICULTY[difficulty].widthRangeForLevel(level);
-        return clamp(randomBetween(minW, maxW), 30, GAME_WIDTH / 3);
+        const shrink = (DIFFICULTY[difficulty].widthShrinkPerLevel || 0) * level;
+        return clamp(randomBetween(Math.max(30, minW - shrink), Math.max(31, maxW - shrink)), 30, GAME_WIDTH / 3);
       })(),
       nextBoxHeight: (() => {
         const level = Math.max(0, Math.floor(prev.boxes.length / 3));
         const [minH, maxH] = DIFFICULTY[difficulty].heightRangeForLevel(level);
         return clamp(randomBetween(minH, maxH), 20, GAME_HEIGHT / 10);
-      })()
+      })(),
+      nextPowerup: null
     }));
 
     // 重置投放状态
@@ -319,11 +383,8 @@ const StackingGame: React.FC = () => {
   }, [gameState, cameraY]);
 
   return (
-    <div style={{ textAlign: 'center', padding: '20px' }}>
-      <h1 style={{ color: '#333', marginBottom: '20px' }}>叠箱子游戏</h1>
-      <div style={{ marginBottom: '10px', fontSize: '18px', color: '#666' }}>
-        得分: {formatScore(gameState.score)} | 最高分: {formatScore(highScore)}
-      </div>
+    <div style={{ textAlign: 'center', padding: 0, margin: 0 }}>
+      
       <GameCanvas
         boxes={gameState.boxes}
         fallingBox={gameState.fallingBox}
@@ -332,6 +393,8 @@ const StackingGame: React.FC = () => {
         nextBoxHeight={gameState.nextBoxHeight}
         gameOver={gameState.gameOver}
         cameraY={cameraY}
+        score={gameState.score}
+        highScore={highScore}
         onMouseMove={handleMouseMove}
         onClick={handleClick}
         onBoxLanded={(box) => {
@@ -339,18 +402,7 @@ const StackingGame: React.FC = () => {
           console.log('箱子落地:', box.id);
         }}
       />
-      <div style={{ marginTop: '20px', color: '#888' }}>
-        {!gameState.gameOver && '移动鼠标控制箱子位置，点击投放箱子'}
-        {gameState.gameOver && (
-          <div style={{ fontSize: '14px', marginTop: '-230px' }}>
-            <p>游戏说明：</p>
-            <p>• 移动鼠标控制箱子位置</p>
-            <p>• 点击投放箱子</p>
-            <p>• 保持箱子平衡，不要让塔倒塌</p>
-            <p>• 随着得分增加，箱子会越来越小</p>
-          </div>
-        )}
-      </div>
+      
     </div>
   );
 };

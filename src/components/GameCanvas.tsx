@@ -4,12 +4,14 @@ import { ParticleSystem } from '../utils/particles';
 
 interface GameCanvasProps {
   boxes: Box[];
-  fallingBox: Box | null; // 正在掉落的箱子
+  fallingBox: Box | null;
   currentBoxX: number;
   nextBoxWidth: number;
   nextBoxHeight: number;
   gameOver: boolean;
   cameraY: number;
+  score: number;
+  highScore: number;
   onMouseMove: (x: number) => void;
   onClick: () => void;
   onBoxLanded?: (box: Box) => void;
@@ -23,6 +25,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   nextBoxHeight,
   gameOver,
   cameraY,
+  score,
+  highScore,
   onMouseMove,
   onClick,
   onBoxLanded
@@ -47,11 +51,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         
         // 如果箱子从移动状态变为静止状态
         if (prevBox.isMoving && !newBox.isMoving) {
+          const cnt = 6 + Math.floor(((newBox.precision ?? 0) * 10));
           particleSystem.current.addParticle(
             newBox.x + newBox.width / 2,
             newBox.y + newBox.height,
             newBox.color,
-            8
+            cnt
           );
           
           if (onBoxLanded) {
@@ -99,6 +104,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
           ctx.save();
           ctx.translate(box.x + box.width / 2, box.y + box.height / 2);
           ctx.rotate((box.rotation * Math.PI) / 180);
+          if (box.warning) {
+            const tSec = performance.now() / 1000;
+            ctx.globalAlpha = 0.7 + 0.3 * Math.sin(tSec * 10);
+          }
           ctx.fillStyle = box.color;
           ctx.fillRect(-box.width / 2, -box.height / 2, box.width, box.height);
           ctx.strokeStyle = '#333';
@@ -113,6 +122,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
           ctx.save();
           ctx.translate(box.x + box.width / 2, box.y + box.height / 2);
           ctx.rotate((box.rotation * Math.PI) / 180);
+          if (box.warning) {
+            const tSec = performance.now() / 1000;
+            ctx.globalAlpha = 0.7 + 0.3 * Math.sin(tSec * 10);
+          }
           ctx.fillStyle = box.color;
           ctx.fillRect(-box.width / 2, -box.height / 2, box.width, box.height);
           ctx.strokeStyle = '#333';
@@ -174,6 +187,90 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       particleSystem.current.render(ctx);
 
       ctx.restore();
+      ctx.fillStyle = '#fff';
+      ctx.font = '18px Arial';
+      ctx.textAlign = 'left';
+      ctx.fillText(`得分: ${score}  最高分: ${highScore}`, 12, 24);
+
+      const latest = boxes.length > 1 ? boxes[boxes.length - 1] : null;
+      const r = latest?.precision ?? 0;
+      const barX = 12;
+      const barY = 32;
+      const barW = canvas.width - 620;
+      const barH = 12;
+      ctx.fillStyle = '#222';
+      ctx.fillRect(barX, barY, barW, barH);
+      ctx.fillStyle = r > 0.8 ? '#4caf50' : r > 0.6 ? '#ff9800' : '#f44336';
+      ctx.fillRect(barX, barY, barW * Math.max(0, Math.min(1, r)), barH);
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(barX, barY, barW, barH);
+
+      const panelW = 160;
+      const panelX = canvas.width - panelW - 10;
+      const panelY = 10;
+      const panelH = canvas.height - 20;
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.fillRect(panelX, panelY, panelW, panelH);
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(panelX, panelY, panelW, panelH);
+      const headerLineY = panelY + 20;
+      ctx.beginPath();
+      ctx.moveTo(panelX + 1, headerLineY);
+      ctx.lineTo(panelX + panelW - 1, headerLineY);
+      ctx.stroke();
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      const addBounds = (b: Box) => {
+        minX = Math.min(minX, b.x);
+        minY = Math.min(minY, b.y);
+        maxX = Math.max(maxX, b.x + b.width);
+        maxY = Math.max(maxY, b.y + b.height);
+      };
+      boxes.forEach(addBounds);
+      if (fallingBox) addBounds(fallingBox);
+      minX = Math.min(minX, 0);
+      maxX = Math.max(maxX, canvas.width);
+      minY = Math.min(minY, canvas.height - 50);
+      maxY = Math.max(maxY, canvas.height);
+      if (!isFinite(minX) || !isFinite(minY)) {
+        minX = 0; minY = canvas.height - 50; maxX = canvas.width; maxY = canvas.height;
+      }
+      const pad = 6;
+      const spanX = Math.max(1, maxX - minX);
+      const spanY = Math.max(1, maxY - minY);
+      const contentH = panelH - (headerLineY - panelY) - pad * 2;
+      let s = Math.min((panelW - pad * 2) / spanX, contentH / spanY);
+      s = Math.min(1, s);
+      const tallest = Math.max(50, ...boxes.map(b => b.height), fallingBox ? fallingBox.height : 0);
+      while (tallest * s > contentH) {
+        s *= 0.9;
+      }
+      const ox = panelX + pad - minX * s;
+      const oy = panelY + panelH - pad - maxY * s;
+      ctx.fillStyle = '#8B4513';
+      ctx.globalAlpha = 0.8;
+      ctx.fillRect(0 * s + ox, (canvas.height - 50) * s + oy, canvas.width * s, 50 * s);
+      ctx.globalAlpha = 1;
+      boxes.forEach(b => {
+        ctx.save();
+        ctx.translate((b.x + b.width / 2) * s + ox, (b.y + b.height / 2) * s + oy);
+        ctx.rotate((b.rotation * Math.PI) / 180);
+        ctx.fillStyle = b.color;
+        ctx.globalAlpha = 0.9;
+        ctx.fillRect(-b.width * s / 2, -b.height * s / 2, b.width * s, b.height * s);
+        ctx.restore();
+      });
+      if (fallingBox) {
+        const fb = fallingBox;
+        ctx.save();
+        ctx.translate((fb.x + fb.width / 2) * s + ox, (fb.y + fb.height / 2) * s + oy);
+        ctx.rotate((fb.rotation * Math.PI) / 180);
+        ctx.fillStyle = fb.color;
+        ctx.globalAlpha = 0.6;
+        ctx.fillRect(-fb.width * s / 2, -fb.height * s / 2, fb.width * s, fb.height * s);
+        ctx.restore();
+      }
 
       if (gameOver) {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
