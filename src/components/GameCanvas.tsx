@@ -44,7 +44,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     if (!ctx) return;
 
     const render = () => {
-      const isPortrait = typeof window !== 'undefined' ? window.innerHeight > window.innerWidth : false;
       // 检测新落地的箱子
       if (previousBoxesRef.current.length > 0 && boxes.length > previousBoxesRef.current.length) {
         const newBox = boxes[boxes.length - 1];
