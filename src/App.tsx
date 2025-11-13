@@ -3,7 +3,7 @@ import GameCanvas from './components/GameCanvas';
 import { Box, GameState, GAME_WIDTH, GAME_HEIGHT, GROUND_HEIGHT, BOX_COLORS, DIFFICULTY, DifficultyLevel, randomBetween, clamp, MU, GRAVITY, TIP_MARGIN_PX } from './types';
 import { PhysicsEngine, analyzeStackStability } from './PhysicsEngine';
 import { playDropSound, playGameOverSound, playSuccessSound } from './utils/sound';
-import { saveHighScore, getHighScore, formatScore } from './utils/score';
+import { saveHighScore, getHighScore } from './utils/score';
 
 const StackingGame: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>({
