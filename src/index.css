@@ -25,3 +25,21 @@ body {
   padding: 2rem;
   text-align: center;
 }
+
+@media (max-width: 768px) {
+  #root {
+    padding: 0.75rem;
+  }
+  body, #root {
+    min-height: 100vh;
+  }
+}
+
+@media (max-width: 480px) {
+  #root {
+    padding: 0.5rem;
+  }
+  body {
+    overflow: hidden;
+  }
+}

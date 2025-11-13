@@ -24,7 +24,7 @@ const StackingGame: React.FC = () => {
     nextPowerup: null
   });
   const [cameraY, setCameraY] = useState(0);
-  const fixedTopY = 400;
+  const fixedTopY = 1080;
   
   const [highScore, setHighScore] = useState(() => getHighScore());
 
@@ -39,8 +39,8 @@ const StackingGame: React.FC = () => {
       id: 0,
       x: GAME_WIDTH / 2 - 40,
       y: GAME_HEIGHT - GROUND_HEIGHT - 40,
-      width: 80,
-      height: 40,
+      width: 120,
+      height: 60,
       color: BOX_COLORS[0],
       isMoving: false,
       velocityX: 0,
@@ -300,8 +300,8 @@ const StackingGame: React.FC = () => {
           id: 0,
           x: GAME_WIDTH / 2 - 40,
           y: GAME_HEIGHT - GROUND_HEIGHT - 40,
-          width: 80,
-          height: 40,
+        width: 120,
+        height: 60,
           color: BOX_COLORS[0],
           isMoving: false,
           velocityX: 0,
@@ -366,12 +366,14 @@ const StackingGame: React.FC = () => {
         const level = Math.max(0, Math.floor(prev.boxes.length / 3));
         const [minW, maxW] = DIFFICULTY[difficulty].widthRangeForLevel(level);
         const shrink = (DIFFICULTY[difficulty].widthShrinkPerLevel || 0) * level;
-        return clamp(randomBetween(Math.max(30, minW - shrink), Math.max(31, maxW - shrink)), 30, GAME_WIDTH / 3);
+        const base = randomBetween(Math.max(30, minW - shrink), Math.max(31, maxW - shrink));
+        return clamp(base * 1.5, 30, GAME_WIDTH / 3);
       })(),
       nextBoxHeight: (() => {
         const level = Math.max(0, Math.floor(prev.boxes.length / 3));
         const [minH, maxH] = DIFFICULTY[difficulty].heightRangeForLevel(level);
-        return clamp(randomBetween(minH, maxH), 20, GAME_HEIGHT / 10);
+        const base = randomBetween(minH, maxH);
+        return clamp(base * 1.5, 20, GAME_HEIGHT / 10);
       })(),
       nextPowerup: null
     }));

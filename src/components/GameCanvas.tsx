@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { Box, BOX_COLORS } from '../types';
+import { Box, BOX_COLORS, GAME_WIDTH, GAME_HEIGHT, clamp } from '../types';
 import { ParticleSystem } from '../utils/particles';
 
 interface GameCanvasProps {
@@ -44,6 +44,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     if (!ctx) return;
 
     const render = () => {
+      const isPortrait = typeof window !== 'undefined' ? window.innerHeight > window.innerWidth : false;
       // 检测新落地的箱子
       if (previousBoxesRef.current.length > 0 && boxes.length > previousBoxesRef.current.length) {
         const newBox = boxes[boxes.length - 1];
@@ -76,7 +77,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       ctx.translate(0, cameraY);
 
       ctx.fillStyle = '#8B4513';
-      ctx.fillRect(0, canvas.height - 50, canvas.width, 50);
+      ctx.fillRect(0, GAME_HEIGHT - 50, GAME_WIDTH, 50);
 
       // 绘制已放置的箱子：低层正常绘制，高层整体摇摆
       const SWAY_THRESHOLD = 5;
@@ -178,7 +179,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
           ctx.setLineDash([5, 5]);
           ctx.beginPath();
           ctx.moveTo(currentBoxX + nextBoxWidth / 2, previewY);
-          ctx.lineTo(currentBoxX + nextBoxWidth / 2, canvas.height);
+          ctx.lineTo(currentBoxX + nextBoxWidth / 2, GAME_HEIGHT);
           ctx.stroke();
           ctx.setLineDash([]);
         }
@@ -196,7 +197,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       const r = latest?.precision ?? 0;
       const barX = 12;
       const barY = 32;
-      const barW = canvas.width - 620;
+      const barW = clamp(Math.floor(GAME_WIDTH * 0.6), 160, GAME_WIDTH - 24);
       const barH = 12;
       ctx.fillStyle = '#222';
       ctx.fillRect(barX, barY, barW, barH);
@@ -206,10 +207,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       ctx.lineWidth = 1;
       ctx.strokeRect(barX, barY, barW, barH);
 
-      const panelW = 160;
-      const panelX = canvas.width - panelW - 10;
-      const panelY = 10;
-      const panelH = canvas.height - 20;
+      const basePanelW = clamp(Math.floor(GAME_WIDTH * 0.25), 140, 240);
+      const panelW = Math.floor(basePanelW * 0.75);
+      const panelX = GAME_WIDTH - panelW - 10;
+     
+      const panelH = Math.floor((GAME_HEIGHT - 20) * 0.5);
+       const panelY = 10 + panelH;
       ctx.fillStyle = 'rgba(0,0,0,0.3)';
       ctx.fillRect(panelX, panelY, panelW, panelH);
       ctx.strokeStyle = '#fff';
@@ -230,11 +233,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       boxes.forEach(addBounds);
       if (fallingBox) addBounds(fallingBox);
       minX = Math.min(minX, 0);
-      maxX = Math.max(maxX, canvas.width);
-      minY = Math.min(minY, canvas.height - 50);
-      maxY = Math.max(maxY, canvas.height);
+      maxX = Math.max(maxX, GAME_WIDTH);
+      minY = Math.min(minY, GAME_HEIGHT - 50);
+      maxY = Math.max(maxY, GAME_HEIGHT);
       if (!isFinite(minX) || !isFinite(minY)) {
-        minX = 0; minY = canvas.height - 50; maxX = canvas.width; maxY = canvas.height;
+        minX = 0; minY = GAME_HEIGHT - 50; maxX = GAME_WIDTH; maxY = GAME_HEIGHT;
       }
       const pad = 6;
       const spanX = Math.max(1, maxX - minX);
@@ -250,7 +253,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       const oy = panelY + panelH - pad - maxY * s;
       ctx.fillStyle = '#8B4513';
       ctx.globalAlpha = 0.8;
-      ctx.fillRect(0 * s + ox, (canvas.height - 50) * s + oy, canvas.width * s, 50 * s);
+      ctx.fillRect(0 * s + ox, (GAME_HEIGHT - 50) * s + oy, GAME_WIDTH * s, 50 * s);
       ctx.globalAlpha = 1;
       boxes.forEach(b => {
         ctx.save();
@@ -274,13 +277,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
       if (gameOver) {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
         ctx.fillStyle = '#fff';
         ctx.font = '48px Arial';
         ctx.textAlign = 'center';
-        ctx.fillText('游戏结束!', canvas.width / 2, canvas.height / 2);
+        ctx.fillText('游戏结束!', GAME_WIDTH / 2, GAME_HEIGHT / 2);
         ctx.font = '24px Arial';
-        ctx.fillText('点击重新开始', canvas.width / 2, canvas.height / 2 + 50);
+        ctx.fillText('点击重新开始', GAME_WIDTH / 2, GAME_HEIGHT / 2 + 50);
       }
 
       animationRef.current = requestAnimationFrame(render);
@@ -298,24 +301,57 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
+    const xCss = e.clientX - rect.left;
+    const x = (xCss / rect.width) * GAME_WIDTH;
     onMouseMove(x);
+  };
+  const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    if (e.touches.length > 0) {
+      const rect = canvas.getBoundingClientRect();
+      const t = e.touches[0];
+      const xCss = t.clientX - rect.left;
+      const x = (xCss / rect.width) * GAME_WIDTH;
+      onMouseMove(x);
+    }
+  };
+  const handleTouchEnd = () => {
+    onClick();
+  };
+  const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const xCss = e.clientX - rect.left;
+    const x = (xCss / rect.width) * GAME_WIDTH;
+    onMouseMove(x);
+  };
+  const handlePointerUp = () => {
+    onClick();
   };
 
   return (
     <canvas
       ref={canvasRef}
-      width={800}
-      height={600}
+      width={GAME_WIDTH}
+      height={GAME_HEIGHT}
       onMouseMove={handleMouseMove}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
       onClick={onClick}
       style={{
         border: '2px solid #333',
         cursor: gameOver ? 'pointer' : 'crosshair',
         display: 'block',
-        margin: '0 auto'
+        margin: '0 auto',
+        width: '100%',
+        height: 'auto',
+        maxHeight: '100vh',
+        touchAction: 'none'
       }}
     />
   );
