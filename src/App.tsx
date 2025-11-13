@@ -24,7 +24,7 @@ const StackingGame: React.FC = () => {
     nextPowerup: null
   });
   const [cameraY, setCameraY] = useState(0);
-  const fixedTopY = 680;
+  const fixedTopY = 580;
   
   const [highScore, setHighScore] = useState(() => getHighScore());
 
@@ -222,7 +222,7 @@ const StackingGame: React.FC = () => {
       if (!isStable) {
         setCameraY(0);
       } else {
-        if (newBoxes.length <= 10) {
+        if (newBoxes.length <= 8) {
           setCameraY(prev => prev + (0 - prev) * 0.3);
         } else {
           const topBox = newBoxes.reduce((acc, b) => (b.y < acc.y ? b : acc), newBoxes[0]);

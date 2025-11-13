@@ -35,8 +35,8 @@ export interface GameState {
   nextPowerup?: 'wider' | 'lockRotation' | null;
 }
 
-export const GAME_WIDTH = 720;
-export const GAME_HEIGHT = 1280;
+export const GAME_WIDTH = 750;
+export const GAME_HEIGHT = 1080;
 export const GROUND_HEIGHT = 50;
 export const GRAVITY = 800;
 export const FRICTION = 0.98;
