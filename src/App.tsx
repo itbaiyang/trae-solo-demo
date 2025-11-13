@@ -24,7 +24,7 @@ const StackingGame: React.FC = () => {
     nextPowerup: null
   });
   const [cameraY, setCameraY] = useState(0);
-  const fixedTopY = 1080;
+  const fixedTopY = 680;
   
   const [highScore, setHighScore] = useState(() => getHighScore());
 
@@ -222,7 +222,7 @@ const StackingGame: React.FC = () => {
       if (!isStable) {
         setCameraY(0);
       } else {
-        if (newBoxes.length <= 4) {
+        if (newBoxes.length <= 10) {
           setCameraY(prev => prev + (0 - prev) * 0.3);
         } else {
           const topBox = newBoxes.reduce((acc, b) => (b.y < acc.y ? b : acc), newBoxes[0]);
@@ -385,7 +385,7 @@ const StackingGame: React.FC = () => {
   }, [gameState, cameraY]);
 
   return (
-    <div style={{ textAlign: 'center', padding: 0, margin: 0 }}>
+    <div style={{ textAlign: 'center', padding: 0, margin: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
       
       <GameCanvas
         boxes={gameState.boxes}
