@@ -1,10 +1,48 @@
 import { Box, GAME_WIDTH, GAME_HEIGHT, GROUND_HEIGHT, GRAVITY, FRICTION, MIN_OVERLAP_RATIO, TIP_MARGIN_PX } from './types';
 
+const DEBUG = true;
+const log = (event: string, data: any) => {
+  if (DEBUG) console.log('[STACK]', event, data);
+};
+
 export class PhysicsEngine {
   static updateBox(box: Box, deltaTime: number): Box {
     const newBox = { ...box };
     const dtSec = deltaTime / 1000;
     const frameFactor = deltaTime / (1000 / 60);
+    if (newBox.isTipping && newBox.pivotX !== undefined && newBox.pivotY !== undefined) {
+      const m = newBox.width * newBox.height;
+      const I = (1 / 12) * m * (newBox.width * newBox.width + newBox.height * newBox.height);
+      const comX = newBox.x + newBox.width / 2;
+      const dx = Math.abs(comX - (newBox.pivotX as number));
+      const dir = comX >= (newBox.pivotX as number) ? 1 : -1;
+      const tau = m * GRAVITY * dx;
+      const alphaRad = tau / Math.max(1, I);
+      const alphaDeg = alphaRad * (180 / Math.PI);
+      newBox.rotationVelocity += dir * alphaDeg * dtSec;
+      const rotDeltaDeg = newBox.rotationVelocity * dtSec;
+      const rotDeltaRad = rotDeltaDeg * Math.PI / 180;
+      const cx = newBox.x + newBox.width / 2;
+      const cy = newBox.y + newBox.height / 2;
+      const vx = cx - (newBox.pivotX as number);
+      const vy = cy - (newBox.pivotY as number);
+      const rx = Math.cos(rotDeltaRad) * vx - Math.sin(rotDeltaRad) * vy;
+      const ry = Math.sin(rotDeltaRad) * vx + Math.cos(rotDeltaRad) * vy;
+      const nx = (newBox.pivotX as number) + rx;
+      const ny = (newBox.pivotY as number) + ry;
+      newBox.rotation += rotDeltaDeg;
+      newBox.x = nx - newBox.width / 2;
+      newBox.y = ny - newBox.height / 2;
+      newBox.rotationVelocity *= Math.pow(FRICTION, frameFactor);
+      log('tipping_update', { id: newBox.id, alphaDeg, rotationVelocity: newBox.rotationVelocity, rotation: newBox.rotation });
+      if (Math.abs(newBox.rotation) > 85) {
+        newBox.isTipping = false;
+        newBox.pivotX = undefined;
+        newBox.pivotY = undefined;
+        newBox.isMoving = true;
+        log('tipping_release', { id: newBox.id });
+      }
+    }
     
     // 应用重力
     if (box.isMoving) {
@@ -21,6 +59,7 @@ export class PhysicsEngine {
         newBox.velocityY = 0;
         newBox.velocityX *= 0.8; // 减少水平速度
         newBox.rotationVelocity *= 0.7; // 减少旋转速度
+        log('physics_ground_snap', { id: newBox.id, y: newBox.y, height: newBox.height });
         
         // 如果速度很小，停止移动
         if (Math.abs(newBox.velocityX) < 0.1 && Math.abs(newBox.rotationVelocity) < 0.1) {
@@ -101,6 +140,7 @@ export class PhysicsEngine {
     // 检查是否有箱子倾斜角度过大
     for (const box of boxes) {
       if (Math.abs(box.rotation) > 30) { // 30度阈值
+        log('unstable_rotation', { id: box.id, rotation: box.rotation });
         return false;
       }
     }
@@ -133,6 +173,7 @@ export class PhysicsEngine {
       }
       
       if (!isSupported) {
+        log('unstable_support', { id: boxes[i].id });
         return false;
       }
     }
@@ -155,7 +196,10 @@ export function analyzeStackStability(boxes: Box[]): { stable: boolean; failingI
     const L = Math.max(support.x, top.x);
     const R = Math.min(support.x + support.width, top.x + top.width);
     const overlapW = R - L;
-    if (overlapW <= 0) return { stable: false, failingIndex: i, reason: 'slide', range: [L, R] };
+    if (overlapW <= 0) {
+      log('analysis_slide_no_overlap', { failingIndex: i, range: [L, R] });
+      return { stable: false, failingIndex: i, reason: 'slide', range: [L, R] };
+    }
 
     let mSum = 0;
     let mxSum = 0;
@@ -166,9 +210,11 @@ export function analyzeStackStability(boxes: Box[]): { stable: boolean; failingI
     }
     const COM_x = mxSum / mSum;
     if (COM_x < L - TIP_MARGIN_PX || COM_x > R + TIP_MARGIN_PX) {
+      log('analysis_tip_com_outside', { failingIndex: i, comX: COM_x, range: [L, R], TIP_MARGIN_PX });
       return { stable: false, failingIndex: i, reason: 'tip', comX: COM_x, range: [L, R] };
     }
     if (overlapW / top.width < MIN_OVERLAP_RATIO) {
+      log('analysis_slide_overlap_ratio_too_low', { failingIndex: i, overlapW, topWidth: top.width, MIN_OVERLAP_RATIO });
       return { stable: false, failingIndex: i, reason: 'slide', comX: COM_x, range: [L, R] };
     }
   }

@@ -5,6 +5,11 @@ import { PhysicsEngine, analyzeStackStability } from './PhysicsEngine';
 import { playDropSound, playGameOverSound, playSuccessSound } from './utils/sound';
 import { saveHighScore, getHighScore } from './utils/score';
 
+const DEBUG = true;
+const log = (event: string, data: any) => {
+  if (DEBUG) console.log('[STACK]', event, data);
+};
+
 const StackingGame: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>({
     boxes: [],
@@ -38,7 +43,7 @@ const StackingGame: React.FC = () => {
     const initialBox: Box = {
       id: 0,
       x: GAME_WIDTH / 2 - 40,
-      y: GAME_HEIGHT - GROUND_HEIGHT - 40,
+      y: GAME_HEIGHT - GROUND_HEIGHT - 60,
       width: 120,
       height: 60,
       color: BOX_COLORS[0],
@@ -100,6 +105,13 @@ const StackingGame: React.FC = () => {
         // 与地面碰撞视为失败
         if (newFallingBox.y + newFallingBox.height >= GAME_HEIGHT - GROUND_HEIGHT) {
           placementFailed = true;
+          log('placement_failed_ground', {
+            id: newFallingBox.id,
+            x: newFallingBox.x,
+            y: newFallingBox.y,
+            height: newFallingBox.height,
+            groundY: GAME_HEIGHT - GROUND_HEIGHT
+          });
         }
 
         // 仅允许与上一个箱子碰撞
@@ -115,6 +127,10 @@ const StackingGame: React.FC = () => {
             const box = newBoxes[i];
             if (PhysicsEngine.checkCollision(newFallingBox, box)) {
               placementFailed = true;
+              log('placement_failed_other_collision', {
+                fallingId: newFallingBox.id,
+                collideWithId: box.id
+              });
               break;
             }
           }
@@ -166,9 +182,24 @@ const StackingGame: React.FC = () => {
             newFallingBox = null;
             addedScoreBonus += Math.round(overlapRatio * 5);
             lastOverlapRatioLocal = overlapRatio;
+            log('placed', {
+              id: newBoxes[newBoxes.length - 1]?.id ?? newBoxes.length,
+              ratio: overlapRatio,
+              x: (adjustedLast as Box).x,
+              y: (adjustedLast as Box).y
+            });
             playSuccessSound();
           } else {
             placementFailed = true;
+            log('placement_failed_insufficient_overlap', {
+              ratio: overlapRatio,
+              fallingId: newFallingBox.id,
+              lastId: lastBox?.id,
+              leftA,
+              rightA,
+              leftB,
+              rightB
+            });
           }
         }
       }
@@ -178,6 +209,24 @@ const StackingGame: React.FC = () => {
       newBoxes = newBoxes.map(box => PhysicsEngine.updateBox(box, deltaTime));
 
       const analysis = analyzeStackStability(newBoxes);
+      if (!analysis.stable) {
+        let extra: any = {};
+        if (analysis.failingIndex !== undefined && newBoxes[analysis.failingIndex] && newBoxes[analysis.failingIndex + 1]) {
+          const support = newBoxes[analysis.failingIndex];
+          const top = newBoxes[analysis.failingIndex + 1];
+          const L = Math.max(support.x, top.x);
+          const R = Math.min(support.x + support.width, top.x + top.width);
+          const overlapW = R - L;
+          extra = { overlapW, topWidth: top.width };
+        }
+        log('stack_unstable', {
+          failingIndex: analysis.failingIndex,
+          reason: analysis.reason,
+          comX: analysis.comX,
+          range: analysis.range,
+          ...extra
+        });
+      }
       if (analysis.range && analysis.comX !== undefined && newBoxes.length > 0) {
         const [L, R] = analysis.range;
         const nearEdge = Math.min(Math.abs((analysis.comX as number) - L), Math.abs((analysis.comX as number) - R)) < TIP_MARGIN_PX;
@@ -186,9 +235,20 @@ const StackingGame: React.FC = () => {
       }
       if (!analysis.stable && analysis.failingIndex !== undefined) {
         const range = analysis.range || [0, 0];
-        const pivotX = (range[0] + range[1]) / 2;
-        const dir = analysis.comX !== undefined ? Math.sign((analysis.comX as number) - pivotX) || 1 : 1;
-        for (let j = analysis.failingIndex + 1; j < newBoxes.length; j++) {
+        const pivotMid = (range[0] + range[1]) / 2;
+        const dir = analysis.comX !== undefined ? Math.sign((analysis.comX as number) - pivotMid) || 1 : 1;
+        const support = newBoxes[analysis.failingIndex];
+        const topIndex = analysis.failingIndex + 1;
+        const topBox = newBoxes[topIndex];
+        if (analysis.reason === 'tip' && topBox) {
+          const pivotXSel = dir > 0 ? range[1] : range[0];
+          const pivotYSel = support.y;
+          if (!topBox.isTipping) {
+            newBoxes[topIndex] = { ...topBox, isTipping: true, pivotX: pivotXSel, pivotY: pivotYSel, isMoving: false };
+            log('tipping_start', { id: topBox.id, pivotX: pivotXSel, pivotY: pivotYSel, failingIndex: analysis.failingIndex, range });
+          }
+        }
+        for (let j = analysis.failingIndex + 2; j < newBoxes.length; j++) {
           const b = { ...newBoxes[j] };
           b.isMoving = true;
           const m = b.width * b.height;
@@ -214,6 +274,7 @@ const StackingGame: React.FC = () => {
       
       // 如果游戏结束，播放音效并保存高分
       if (!isStable && !prevState.gameOver) {
+        log('game_over_unstable', {});
         playGameOverSound();
         saveHighScore(prevState.score);
         setHighScore(getHighScore());
@@ -234,6 +295,8 @@ const StackingGame: React.FC = () => {
       const timeLeftNext = prevState.mode === 'timed' ? Math.max(0, (prevState.timeLeft || 30) - deltaTime / 1000) : prevState.timeLeft;
       const limitedFail = prevState.mode === 'limited' && prevState.maxBoxes !== undefined && newBoxes.length >= (prevState.maxBoxes as number);
       const timedFail = prevState.mode === 'timed' && (timeLeftNext as number) <= 0;
+      if (limitedFail) log('mode_limited_fail', { maxBoxes: prevState.maxBoxes, length: newBoxes.length });
+      if (timedFail) log('mode_timed_fail', { timeLeft: timeLeftNext });
       return {
         ...prevState,
         boxes: newBoxes,
@@ -299,7 +362,7 @@ const StackingGame: React.FC = () => {
         const initialBox: Box = {
           id: 0,
           x: GAME_WIDTH / 2 - 40,
-          y: GAME_HEIGHT - GROUND_HEIGHT - 40,
+          y: GAME_HEIGHT - GROUND_HEIGHT - 60,
         width: 120,
         height: 60,
           color: BOX_COLORS[0],
@@ -400,8 +463,14 @@ const StackingGame: React.FC = () => {
         onMouseMove={handleMouseMove}
         onClick={handleClick}
         onBoxLanded={(box) => {
-          // 可以在这里添加额外的逻辑
-          console.log('箱子落地:', box.id);
+          log('box_landed', {
+            id: box.id,
+            precision: box.precision,
+            x: box.x,
+            y: box.y,
+            width: box.width,
+            height: box.height
+          });
         }}
       />
       

@@ -12,6 +12,9 @@ export interface Box {
   rotationVelocity: number;
   warning?: boolean;
   precision?: number;
+  isTipping?: boolean;
+  pivotX?: number;
+  pivotY?: number;
 }
 
 export interface GameState {
